@@ -89,14 +89,11 @@ func getPeerInformation() ([]NtpPeerInfo, error) {
 		return nil, err
 	}
 	// cut first 2 lines
-	lines := strings.Split(string(value[:]), "\n")
+	lines := strings.Split(strings.TrimRight(string(value[:]), "\n"), "\n")
 	lines = lines[2:]
 	peers := make([]NtpPeerInfo, 0, len(lines))
 	for _, line := range lines {
-		values := strings.Fields(line)
-		if len(values) != 10 {
-			continue
-		}
+		values := strings.Fields(line[1:])
 		peer, err := makeNtpPeerInfo(values)
 		if err != nil {
 			return nil, err
