@@ -17,11 +17,27 @@ type NtpPlugin struct {
 
 func (c NtpPlugin) GraphDefinition() map[string](mp.Graphs) {
 	graphdef["ntp.drift"] = mp.Graphs{
-		Label: "Drift",
+		Label: "NTP Drift",
 		Unit:  "float",
 		Metrics: [](mp.Metrics){
-			mp.Metrics{Name: "drift", Label: "Drift", Diff: false},
+			mp.Metrics{Name: "drift", Label: "NTP Drift", Diff: false},
 		},
+	}
+
+	// Add peer information
+	peers, err := getPeerInformation()
+	peerMetrics := make([]mp.Metrics, 0, len(peers))
+	if err == nil {
+		for _, peer := range peers {
+			peerMetrics = append(peerMetrics, mp.Metrics{Name: peer.host + ".delay", Label: peer.host + " Delay", Diff: false})
+			peerMetrics = append(peerMetrics, mp.Metrics{Name: peer.host + ".offset", Label: peer.host + " Offset", Diff: false})
+			peerMetrics = append(peerMetrics, mp.Metrics{Name: peer.host + ".jitter", Label: peer.host + " Jitter", Diff: false})
+		}
+	}
+	graphdef["ntp.peers"] = mp.Graphs{
+		Label:   "NTP Peers",
+		Unit:    "float",
+		Metrics: peerMetrics,
 	}
 	return graphdef
 }
@@ -33,6 +49,16 @@ func (c NtpPlugin) FetchMetrics() (map[string]float64, error) {
 	err = getDrift(c.DriftFile, &p)
 	if err != nil {
 		return nil, err
+	}
+	var peers []NtpPeerInfo
+	peers, err = getPeerInformation()
+	if err != nil {
+		return nil, err
+	}
+	for _, peer := range peers {
+		p[peer.host+".delay"] = peer.delay
+		p[peer.host+".offset"] = peer.offset
+		p[peer.host+".jitter"] = peer.jitter
 	}
 	return p, nil
 }
@@ -48,6 +74,53 @@ func getDrift(path string, p *map[string]float64) error {
 	}
 	(*p)["drift"] = drift
 	return nil
+}
+
+type NtpPeerInfo struct {
+	host   string
+	delay  float64
+	offset float64
+	jitter float64
+}
+
+func getPeerInformation() ([]NtpPeerInfo, error) {
+	value, err := exec.Command("ntpq", "-p").Output()
+	if err != nil {
+		return nil, err
+	}
+	// cut first 2 lines
+	lines := strings.Split(string(value[:]), "\n")
+	lines = lines[2:]
+	peers := make([]NtpPeerInfo, 0, len(lines))
+	for _, line := range lines {
+		values := strings.Fields(line)
+		if len(values) != 10 {
+			continue
+		}
+		peer, err := makeNtpPeerInfo(values)
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, peer)
+	}
+	return peers, nil
+}
+
+func makeNtpPeerInfo(l []string) (NtpPeerInfo, error) {
+	host := l[0]
+	delay, err := strconv.ParseFloat(l[7], 64)
+	if err != nil {
+		return NtpPeerInfo{}, err
+	}
+	offset, err := strconv.ParseFloat(l[8], 64)
+	if err != nil {
+		return NtpPeerInfo{}, err
+	}
+	jitter, err := strconv.ParseFloat(l[9], 64)
+	if err != nil {
+		return NtpPeerInfo{}, err
+	}
+	return NtpPeerInfo{host, delay, offset, jitter}, nil
 }
 
 var Flags = []cli.Flag{
